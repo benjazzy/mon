@@ -84,6 +84,11 @@ func eventLoop(conn *websocket.Conn) {
 						table.Rows[i][1] = strconv.FormatBool(s.Online)
 						table.Rows[i][2] = fmt.Sprintf("%f", s.Cpu.Usage)
 						table.Rows[i][3] = fmt.Sprintf("%f", s.Cpu.Temperature)
+						if s.Online {
+							table.RowStyles[i] = ui.NewStyle(ui.ColorWhite, ui.ColorBlack)
+						} else {
+							table.RowStyles[i] = ui.NewStyle(ui.ColorWhite, ui.ColorRed)
+						}
 						break
 					} else if i+1 == len(table.Rows) {
 						//unfound = append(unfound, []string{s.Hostname, "true", fmt.Sprintf("%f", s.Cpu.Usage), fmt.Sprintf("%f", s.Cpu.Temperature)})
