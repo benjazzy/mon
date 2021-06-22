@@ -61,7 +61,7 @@ func receive(w http.ResponseWriter, r *http.Request) {
 			log.Println("read:", err)
 			return
 		}
-		log.Printf("recv: %s", message)
+		//log.Printf("recv: %s", message)
 
 		var s shared.Status
 		err = json.Unmarshal(message, &s)
@@ -121,7 +121,7 @@ func send(w http.ResponseWriter, r *http.Request) {
 			log.Println("read:", err)
 			break
 		}
-		log.Printf("recv: %s", message)
+		//log.Printf("recv: %s", message)
 
 		if string(message) == "get" {
 			//log.Println("get")
