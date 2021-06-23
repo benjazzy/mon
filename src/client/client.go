@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"golang.org/x/sys/unix"
 	"log"
 	"net/url"
 	"os"
@@ -15,6 +16,34 @@ import (
 )
 
 var addr = flag.String("addr", "localhost:8080", "http service address")
+
+func connect(u url.URL) (*websocket.Conn, error) {
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+
+	if err == nil {
+		go func() {
+			//defer close(done)
+			for {
+				_, message, err := c.ReadMessage()
+				if err != nil {
+					log.Println("read:", err)
+					break
+				}
+				log.Printf("recv: %s", message)
+				if string(message) == "reboot" {
+					unix.Sync()
+					err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
+					if err != nil {
+						log.Println("Failed to reboot:", err)
+					}
+					os.Exit(0)
+				}
+			}
+		}()
+	}
+
+	return c, err
+}
 
 func main() {
 	flag.Parse()
@@ -31,27 +60,48 @@ func main() {
 
 	for {
 		log.Println("Connecting")
-		c, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-		if err == nil {
+		//c, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
+		c, err = connect(u)
+		if err != nil {
+			log.Println("Failed")
+			time.Sleep(time.Second * 10)
+		} else {
 			log.Println("Connected")
 			break
 		}
-		log.Println("Failed")
-		time.Sleep(time.Second * 10)
 	}
 	defer c.Close()
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Println("Error getting hostname")
+		return
+	}
+
+	err = c.WriteMessage(websocket.TextMessage, []byte(hostname))
+	if err != nil {
+		log.Println("write:", err)
+	}
 
 	done := make(chan struct{})
 
 	//go func() {
-	//	defer close(done)
+	//	//defer close(done)
 	//	for {
 	//		_, message, err := c.ReadMessage()
 	//		if err != nil {
 	//			log.Println("read:", err)
-	//			return
+	//			break
 	//		}
 	//		log.Printf("recv: %s", message)
+	//		if string(message) == "reboot" {
+	//			unix.Sync()
+	//			err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
+	//			if err != nil {
+	//				log.Println("Failed to reboot:", err)
+	//			}
+	//			os.Exit(0)
+	//		}
 	//	}
 	//}()
 
@@ -67,13 +117,14 @@ func main() {
 			return
 		case <-reconnect.C:
 			log.Println("Reconnecting")
-			c, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-			if err == nil {
+			//c, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
+			c, err = connect(u)
+			if err != nil {
+				log.Println("Failed")
+			} else {
 				log.Println("Connected")
 				ticker.Reset(time.Second * 1)
 				reconnect.Stop()
-			} else {
-				log.Println("Failed")
 			}
 		case <-ticker.C:
 			j, err := json.Marshal(shared.GetStatus())

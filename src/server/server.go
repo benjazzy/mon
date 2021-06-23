@@ -8,6 +8,7 @@ import (
 	"log"
 	"mon/src/shared"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,36 +17,38 @@ var addr = flag.String("addr", "localhost:8080", "http service address")
 
 var upgrader = websocket.Upgrader{} // use default options
 
+var clientSockets = make(map[string]*websocket.Conn)
+
 var status = make(map[string]*shared.Status)
 var statusLock = &sync.Mutex{}
 
 var timers = make(map[string]*time.Timer)
 
-func echo(w http.ResponseWriter, r *http.Request) {
-	c, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Print("upgrade:", err)
-		return
-	}
-	defer c.Close()
-	for {
-		mt, message, err := c.ReadMessage()
-		if err != nil {
-			log.Println("read:", err)
-			break
-		}
-		log.Printf("recv: %s", message)
-		err = c.WriteMessage(mt, message)
-		if err != nil {
-			log.Println("write:", err)
-			break
-		}
-	}
-}
-
-func home(w http.ResponseWriter, r *http.Request) {
-	homeTemplate.Execute(w, "ws://"+r.Host+"/echo")
-}
+//func echo(w http.ResponseWriter, r *http.Request) {
+//	c, err := upgrader.Upgrade(w, r, nil)
+//	if err != nil {
+//		log.Print("upgrade:", err)
+//		return
+//	}
+//	defer c.Close()
+//	for {
+//		mt, message, err := c.ReadMessage()
+//		if err != nil {
+//			log.Println("read:", err)
+//			break
+//		}
+//		log.Printf("recv: %s", message)
+//		err = c.WriteMessage(mt, message)
+//		if err != nil {
+//			log.Println("write:", err)
+//			break
+//		}
+//	}
+//}
+//
+//func home(w http.ResponseWriter, r *http.Request) {
+//	homeTemplate.Execute(w, "ws://"+r.Host+"/echo")
+//}
 
 func receive(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
@@ -55,6 +58,15 @@ func receive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer c.Close()
+
+	_, hostname, err := c.ReadMessage()
+	if err != nil {
+		log.Println("read:", err)
+		return
+	}
+
+	clientSockets[string(hostname)] = c
+
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
@@ -121,7 +133,7 @@ func send(w http.ResponseWriter, r *http.Request) {
 			log.Println("read:", err)
 			break
 		}
-		//log.Printf("recv: %s", message)
+		log.Printf("recv: %s", message)
 
 		if string(message) == "get" {
 			//log.Println("get")
@@ -137,6 +149,23 @@ func send(w http.ResponseWriter, r *http.Request) {
 				log.Println("write:", err)
 				break
 			}
+		} else if strings.Fields(string(message))[0] == "reboot" {
+			splitMessage := strings.Fields(string(message))
+			if len(splitMessage) != 2 {
+				log.Println("Error parsing command:", string(message))
+				continue
+			}
+			log.Println("Restarting:", splitMessage[1])
+			if client, ok := status[splitMessage[1]]; ok {
+				if client.Online {
+					if conn, ok := clientSockets[splitMessage[1]]; ok {
+						err := conn.WriteMessage(websocket.TextMessage, []byte("reboot"))
+						if err != nil {
+							log.Println("Error sending restart command to:", splitMessage[1])
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -144,10 +173,13 @@ func send(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 	log.SetFlags(0)
-	http.HandleFunc("/echo", echo)
+	upgrader.CheckOrigin = func(r *http.Request) bool {
+		return true
+	}
+	//http.HandleFunc("/echo", echo)
 	http.HandleFunc("/receive", receive)
 	http.HandleFunc("/send", send)
-	http.HandleFunc("/", home)
+	//http.HandleFunc("/", home)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 

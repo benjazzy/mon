@@ -12,10 +12,10 @@ import (
 )
 
 type cpuInfo struct {
-	Type        string
-	Usage       float64
-	Load        [3]float64
-	Temperature float64
+	Type        string     `json:"type"`
+	Usage       float64    `json:"usage"`
+	Load        [3]float64 `json:"load"`
+	Temperature float64    `json:"temperature"`
 }
 
 func GetCPU() cpuInfo {

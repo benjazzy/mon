@@ -6,9 +6,9 @@ import (
 )
 
 type Status struct {
-	Hostname string
-	Online   bool
-	Cpu      cpuInfo
+	Hostname string  `json:"hostname"`
+	Online   bool    `json:"online"`
+	Cpu      cpuInfo `json:"cpu"`
 }
 
 func GetStatus() Status {
