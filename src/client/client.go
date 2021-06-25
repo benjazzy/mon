@@ -29,7 +29,9 @@ func connect(u url.URL) (*websocket.Conn, error) {
 					log.Println("read:", err)
 					break
 				}
-				log.Printf("recv: %s", message)
+				if string(message) != "ping" {
+					log.Printf("recv: %s", message)
+				}
 				if string(message) == "reboot" {
 					unix.Sync()
 					err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)

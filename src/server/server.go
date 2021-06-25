@@ -218,6 +218,24 @@ func main() {
 	upgrader.CheckOrigin = func(r *http.Request) bool {
 		return true
 	}
+
+	keepAlive := time.NewTicker(time.Second)
+
+	go func() {
+		for {
+			<-keepAlive.C
+			socketsLock.Lock()
+			for client, conn := range clientSockets {
+				err := conn.WriteMessage(websocket.TextMessage, []byte("ping"))
+				if err != nil {
+					log.Println("ping:", err)
+					delete(clientSockets, client)
+				}
+			}
+			socketsLock.Unlock()
+		}
+	}()
+
 	http.HandleFunc("/receive", receive)
 	http.HandleFunc("/send", send)
 	log.Fatal(http.ListenAndServe(*addr, nil))
