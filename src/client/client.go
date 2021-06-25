@@ -85,26 +85,6 @@ func main() {
 
 	done := make(chan struct{})
 
-	//go func() {
-	//	//defer close(done)
-	//	for {
-	//		_, message, err := c.ReadMessage()
-	//		if err != nil {
-	//			log.Println("read:", err)
-	//			break
-	//		}
-	//		log.Printf("recv: %s", message)
-	//		if string(message) == "reboot" {
-	//			unix.Sync()
-	//			err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
-	//			if err != nil {
-	//				log.Println("Failed to reboot:", err)
-	//			}
-	//			os.Exit(0)
-	//		}
-	//	}
-	//}()
-
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -127,7 +107,8 @@ func main() {
 				reconnect.Stop()
 			}
 		case <-ticker.C:
-			j, err := json.Marshal(shared.GetStatus())
+			hostnameConfig := make([]string, 0)
+			j, err := json.Marshal(shared.GetStatus(hostnameConfig))
 			if err != nil {
 				log.Println("json:", err)
 			}

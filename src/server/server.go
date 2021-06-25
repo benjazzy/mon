@@ -3,11 +3,14 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/gorilla/websocket"
+	"github.com/spf13/viper"
 	"html/template"
 	"log"
 	"mon/src/shared"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +84,17 @@ func receive(w http.ResponseWriter, r *http.Request) {
 			log.Println("json:", err)
 		}
 
+		if viper.IsSet("clients") {
+			inConfig := false
+			for _, c := range viper.GetStringSlice("clients") {
+				if c == s.Hostname {
+					inConfig = true
+					break
+				}
+			}
+			s.InConfig = inConfig
+		}
+
 		statusLock.Lock()
 		if _, ok := timers[s.Hostname]; ok {
 			if !status[s.Hostname].Online {
@@ -133,44 +147,123 @@ func send(w http.ResponseWriter, r *http.Request) {
 			log.Println("read:", err)
 			break
 		}
-		log.Printf("recv: %s", message)
+		//log.Printf("recv: %s", message)
 
-		if string(message) == "get" {
-			//log.Println("get")
-			statusLock.Lock()
-			m, err := json.Marshal(status)
-			statusLock.Unlock()
-			if err != nil {
-				log.Println("json:", err)
-			}
+		splitMessage := strings.Fields(string(message))
 
-			err = c.WriteMessage(websocket.TextMessage, m)
-			if err != nil {
-				log.Println("write:", err)
-				break
+		if len(splitMessage) == 1 {
+			if string(message) == "get" {
+				//log.Println("get")
+				clients := make(map[string]*shared.Status)
+				for _, client := range viper.GetStringSlice("clients") {
+					c := shared.NewEmpty(client)
+					clients[client] = &c
+				}
+
+				for hostname, client := range status {
+					clients[hostname] = client
+				}
+
+				statusLock.Lock()
+				m, err := json.Marshal(clients)
+				statusLock.Unlock()
+				if err != nil {
+					log.Println("json:", err)
+				}
+
+				err = c.WriteMessage(websocket.TextMessage, m)
+				if err != nil {
+					log.Println("write:", err)
+					break
+				}
+			} else {
+				log.Println("unknown command:", string(message))
 			}
-		} else if strings.Fields(string(message))[0] == "reboot" {
-			splitMessage := strings.Fields(string(message))
-			if len(splitMessage) != 2 {
-				log.Println("Error parsing command:", string(message))
-				continue
-			}
-			log.Println("Restarting:", splitMessage[1])
-			if client, ok := status[splitMessage[1]]; ok {
-				if client.Online {
-					if conn, ok := clientSockets[splitMessage[1]]; ok {
-						err := conn.WriteMessage(websocket.TextMessage, []byte("reboot"))
-						if err != nil {
-							log.Println("Error sending restart command to:", splitMessage[1])
+		} else if len(splitMessage) == 2 {
+			if splitMessage[0] == "reboot" {
+				log.Println("Restarting:", splitMessage[1])
+				if client, ok := status[splitMessage[1]]; ok {
+					if client.Online {
+						if conn, ok := clientSockets[splitMessage[1]]; ok {
+							err := conn.WriteMessage(websocket.TextMessage, []byte("reboot"))
+							if err != nil {
+								log.Println("Error sending restart command to:", splitMessage[1])
+							}
 						}
 					}
 				}
+			} else if splitMessage[0] == "add" {
+				if client, ok := status[splitMessage[1]]; ok {
+					contains := false
+					for _, c := range viper.GetStringSlice("clients") {
+						if c == client.Hostname {
+							contains = true
+							break
+						}
+					}
+					if !contains {
+						//log.Println("add")
+						viper.Set("clients", append(viper.GetStringSlice("clients"), client.Hostname))
+						err := viper.WriteConfig()
+						if err != nil {
+							log.Println("config:", err)
+						}
+					} else {
+						log.Println("client ", client.Hostname, "already in config")
+					}
+				}
+			} else if splitMessage[0] == "check" {
+				if client, ok := status[splitMessage[1]]; ok {
+					contains := false
+					for _, c := range viper.GetStringSlice("clients") {
+						if c == client.Hostname {
+							contains = true
+							break
+						}
+					}
+					err := c.WriteMessage(websocket.TextMessage, []byte(client.Hostname+" "+strconv.FormatBool(contains)))
+					if err != nil {
+						log.Println("write:", err)
+						break
+					}
+				}
+			} else if splitMessage[0] == "remove" {
+				if viper.IsSet("clients") {
+					for i, c := range viper.GetStringSlice("clients") {
+						if c == splitMessage[1] {
+							viper.Set("clients", remove(viper.GetStringSlice("clients"), i))
+							err := viper.WriteConfig()
+							if err != nil {
+								log.Println("config:", err)
+							}
+							break
+						}
+					}
+				}
+			} else {
+				log.Println("unknown command:", string(message))
 			}
+		} else {
+			log.Println("Error parsing command:", string(message))
 		}
 	}
 }
 
+func remove(s []string, i int) []string {
+	s[len(s)-1], s[i] = s[i], s[len(s)-1]
+	return s[:len(s)-1]
+}
+
 func main() {
+	viper.SetConfigName("mons")  // name of config file (without extension)
+	viper.SetConfigType("json")  // REQUIRED if the config file does not have the extension in the name
+	viper.AddConfigPath("/etc/") // path to look for the config file in
+	viper.AddConfigPath(".")     // optionally look for config in the working directory
+	err := viper.ReadInConfig()  // Find and read the config file
+	if err != nil {              // Handle errors reading the config file
+		panic(fmt.Errorf("Fatal error config file: %w \n", err))
+	}
+
 	flag.Parse()
 	log.SetFlags(0)
 	upgrader.CheckOrigin = func(r *http.Request) bool {
