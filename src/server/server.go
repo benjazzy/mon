@@ -219,7 +219,7 @@ func main() {
 		return true
 	}
 
-	keepAlive := time.NewTicker(time.Second)
+	keepAlive := time.NewTicker(time.Minute)
 
 	go func() {
 		for {
