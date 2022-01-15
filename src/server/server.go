@@ -109,91 +109,106 @@ func send(w http.ResponseWriter, r *http.Request) {
 
 		if len(splitMessage) == 1 {
 			if string(message) == "get" {
-				//log.Println("get")
-				clients := make(map[string]*shared.Status)
-				for _, client := range viper.GetStringSlice("clients") {
-					c := shared.NewEmpty(client)
-					clients[client] = &c
-				}
-
-				statusLock.Lock()
-				for hostname, client := range status {
-					clients[hostname] = client
-				}
-				m, err := json.Marshal(clients)
-				statusLock.Unlock()
-				if err != nil {
-					log.Println("json:", err)
-				}
-
-				err = c.WriteMessage(websocket.TextMessage, m)
-				if err != nil {
-					log.Println("write:", err)
-					break
-				}
+				handleGet(c)
 			} else {
 				log.Println("unknown command:", string(message))
 			}
 		} else if len(splitMessage) == 2 {
 			if splitMessage[0] == "reboot" {
-				log.Println("Restarting:", splitMessage[1])
-
-				statusLock.Lock()
-				client, ok := status[splitMessage[1]]
-				statusLock.Unlock()
-				if ok {
-					if client.Online {
-						socketsLock.Lock()
-						if conn, ok := clientSockets[splitMessage[1]]; ok {
-							err := conn.WriteMessage(websocket.TextMessage, []byte("reboot"))
-							if err != nil {
-								log.Println("Error sending restart command to:", splitMessage[1])
-							}
-						}
-						socketsLock.Unlock()
-					}
-				}
+				handleReboot(splitMessage)
 			} else if splitMessage[0] == "add" {
-				statusLock.Lock()
-				client, ok := status[splitMessage[1]]
-				statusLock.Unlock()
-				if ok {
-					contains := false
-					for _, c := range viper.GetStringSlice("clients") {
-						if c == client.Hostname {
-							contains = true
-							break
-						}
-					}
-					if !contains {
-						//log.Println("add")
-						viper.Set("clients", append(viper.GetStringSlice("clients"), client.Hostname))
-						err := viper.WriteConfig()
-						if err != nil {
-							log.Println("config:", err)
-						}
-					} else {
-						log.Println("client ", client.Hostname, "already in config")
-					}
-				}
+				handleAdd(splitMessage)
 			} else if splitMessage[0] == "remove" {
-				if viper.IsSet("clients") {
-					for i, c := range viper.GetStringSlice("clients") {
-						if c == splitMessage[1] {
-							viper.Set("clients", remove(viper.GetStringSlice("clients"), i))
-							err := viper.WriteConfig()
-							if err != nil {
-								log.Println("config:", err)
-							}
-							break
-						}
-					}
-				}
+				handleRemove(splitMessage)
 			} else {
 				log.Println("unknown command:", string(message))
 			}
 		} else {
 			log.Println("Error parsing command:", string(message))
+		}
+	}
+}
+
+func handleGet(c *websocket.Conn) {
+	//log.Println("get")
+	clients := make(map[string]*shared.Status)
+	for _, client := range viper.GetStringSlice("clients") {
+		c := shared.NewEmpty(client)
+		clients[client] = &c
+	}
+
+	statusLock.Lock()
+	for hostname, client := range status {
+		clients[hostname] = client
+	}
+	m, err := json.Marshal(clients)
+	statusLock.Unlock()
+	if err != nil {
+		log.Println("json:", err)
+	}
+
+	err = c.WriteMessage(websocket.TextMessage, m)
+	if err != nil {
+		log.Println("write:", err)
+	}
+}
+
+func handleReboot(splitMessage []string) {
+	log.Println("Restarting:", splitMessage[1])
+
+	statusLock.Lock()
+	client, ok := status[splitMessage[1]]
+	statusLock.Unlock()
+	if ok {
+		if client.Online {
+			socketsLock.Lock()
+			if conn, ok := clientSockets[splitMessage[1]]; ok {
+				err := conn.WriteMessage(websocket.TextMessage, []byte("reboot"))
+				if err != nil {
+					log.Println("Error sending restart command to:", splitMessage[1])
+				}
+			}
+			socketsLock.Unlock()
+		}
+	}
+}
+
+func handleAdd(splitMessage []string) {
+	statusLock.Lock()
+	client, ok := status[splitMessage[1]]
+	statusLock.Unlock()
+	if ok {
+		contains := false
+		for _, c := range viper.GetStringSlice("clients") {
+			if c == client.Hostname {
+				contains = true
+				break
+			}
+		}
+		if !contains {
+			//log.Println("add")
+			viper.Set("clients", append(viper.GetStringSlice("clients"), client.Hostname))
+			err := viper.WriteConfig()
+			if err != nil {
+				log.Println("config:", err)
+			}
+		} else {
+			log.Println("client ", client.Hostname, "already in config")
+		}
+	}
+}
+
+func handleRemove(splitMessage []string) {
+	if viper.IsSet("clients") {
+		for i, c := range viper.GetStringSlice("clients") {
+			if c == splitMessage[1] {
+				viper.Set("clients", remove(viper.GetStringSlice("clients"), i))
+				err := viper.WriteConfig()
+				if err != nil {
+					log.Println("config:", err)
+				}
+				break
+			}
 		}
 	}
 }
