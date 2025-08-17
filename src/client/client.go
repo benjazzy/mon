@@ -22,29 +22,60 @@ func connect(u url.URL) (*websocket.Conn, error) {
 
 	if err == nil {
 		go func() {
-			//defer close(done)
-			for {
-				_, message, err := c.ReadMessage()
-				if err != nil {
-					log.Println("read:", err)
-					break
-				}
-				if string(message) != "ping" {
-					log.Printf("recv: %s", message)
-				}
-				if string(message) == "reboot" {
-					unix.Sync()
-					err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
-					if err != nil {
-						log.Println("Failed to reboot:", err)
-					}
-					os.Exit(0)
-				}
-			}
+			receive(c)
 		}()
 	}
 
 	return c, err
+}
+
+func receive(c *websocket.Conn) {
+	for {
+		_, message, err := c.ReadMessage()
+		log.Println(string(message))
+		if err != nil {
+			log.Println("read:", err)
+			break
+		}
+		switch shared.ClientCommand(string(message)) {
+		case shared.Ping:
+			log.Printf("recv: %s", message)
+		case shared.Reboot:
+			unixReboot(unix.LINUX_REBOOT_CMD_RESTART)
+		case shared.Shutdown:
+			unixReboot(unix.LINUX_REBOOT_CMD_POWER_OFF)
+		}
+		//if string(message) != "ping" {
+		//	log.Printf("recv: %s", message)
+		//}
+		//if string(message) == "reboot" {
+		//	unix.Sync()
+		//	err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
+		//	if err != nil {
+		//		log.Println("Failed to reboot:", err)
+		//	}
+		//	os.Exit(0)
+		//}
+	}
+}
+
+func unixReboot(c int) {
+	log.Println("Rebooting")
+	unix.Sync()
+	err := unix.Reboot(c)
+	if err != nil {
+		log.Println("Failed to reboot:", err)
+	}
+	os.Exit(0)
+}
+
+func sendStatus(c *websocket.Conn) error {
+	hostnameConfig := make([]string, 0)
+	j, err := json.Marshal(shared.GetStatus(hostnameConfig))
+	if err != nil {
+		log.Println("json:", err)
+	}
+	return c.WriteMessage(websocket.TextMessage, j)
 }
 
 func main() {
@@ -74,13 +105,13 @@ func main() {
 	}
 	defer c.Close()
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Println("Error getting hostname")
-		return
-	}
+	//hostname, err := os.Hostname()
+	//if err != nil {
+	//	log.Println("Error getting hostname")
+	//	return
+	//}
 
-	err = c.WriteMessage(websocket.TextMessage, []byte(hostname))
+	err = sendStatus(c)
 	if err != nil {
 		log.Println("write:", err)
 	}
@@ -109,12 +140,7 @@ func main() {
 				reconnect.Stop()
 			}
 		case <-ticker.C:
-			hostnameConfig := make([]string, 0)
-			j, err := json.Marshal(shared.GetStatus(hostnameConfig))
-			if err != nil {
-				log.Println("json:", err)
-			}
-			err = c.WriteMessage(websocket.TextMessage, j)
+			err = sendStatus(c)
 			if err != nil {
 				log.Println("write:", err)
 				ticker.Stop()

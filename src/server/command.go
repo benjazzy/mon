@@ -3,9 +3,11 @@ package main
 type Type string
 
 const (
-	Get      Type = "get"
-	Reboot        = "reboot"
-	Shutdown      = "shutdown"
+	Get Type		= "get"
+	Reboot Type		= "reboot"
+	Shutdown Type   = "shutdown"
+	Add	Type		= "add"
+	Remove Type 	= "remove"
 )
 
 type Command struct {

@@ -9,7 +9,6 @@ import (
 	"log"
 	"mon/src/shared"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -33,14 +32,20 @@ func receive(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.Close()
 
-	_, hostname, err := c.ReadMessage()
+	_, message, err := c.ReadMessage()
 	if err != nil {
 		log.Println("read:", err)
 		return
 	}
 
+	var s shared.Status
+	err = json.Unmarshal(message, &s)
+	if err != nil {
+		log.Println("json:", err)
+	}
+
 	socketsLock.Lock()
-	clientSockets[string(hostname)] = c
+	clientSockets[s.Hostname] = c
 	socketsLock.Unlock()
 
 	timer := time.NewTimer(time.Second * 5)
@@ -103,29 +108,52 @@ func send(w http.ResponseWriter, r *http.Request) {
 			log.Println("read:", err)
 			break
 		}
-		//log.Printf("recv: %s", message)
+		log.Printf("recv: %s", message)
 
-		splitMessage := strings.Fields(string(message))
+		//splitMessage := strings.Fields(string(message))
 
-		if len(splitMessage) == 1 {
-			if string(message) == "get" {
-				handleGet(c)
-			} else {
-				log.Println("unknown command:", string(message))
-			}
-		} else if len(splitMessage) == 2 {
-			if splitMessage[0] == "reboot" {
-				handleReboot(splitMessage)
-			} else if splitMessage[0] == "add" {
-				handleAdd(splitMessage)
-			} else if splitMessage[0] == "remove" {
-				handleRemove(splitMessage)
-			} else {
-				log.Println("unknown command:", string(message))
-			}
-		} else {
+		var command Command
+		err = json.Unmarshal(message, &command)
+		if err != nil {
+			log.Println("unmarshal:", err)
+			break
+		}
+
+		switch command.Command {
+		case Get:
+			handleGet(c)
+		case Reboot:
+			sendClientCommand(command.Data, shared.Reboot)
+		case Shutdown:
+			sendClientCommand(command.Data, shared.Shutdown)
+		case Add:
+			handleAdd(command.Data)
+		case Remove:
+			handleRemove(command.Data)
+		default:
 			log.Println("Error parsing command:", string(message))
 		}
+
+		//if len(splitMessage) == 1 {
+		//	m := strings.TrimSuffix(string(message), "\n")
+		//	if m == "get" {
+		//		handleGet(c)
+		//	} else {
+		//		log.Println("unknown command:", string(message))
+		//	}
+		//} else if len(splitMessage) == 2 {
+		//	if splitMessage[0] == "reboot" {
+		//		handleReboot(splitMessage)
+		//	} else if splitMessage[0] == "add" {
+		//		handleAdd(splitMessage)
+		//	} else if splitMessage[0] == "remove" {
+		//		handleRemove(splitMessage)
+		//	} else {
+		//		log.Println("unknown command:", string(message))
+		//	}
+		//} else {
+		//	log.Println("Error parsing command:", string(message))
+		//}
 	}
 }
 
@@ -153,29 +181,41 @@ func handleGet(c *websocket.Conn) {
 	}
 }
 
-func handleReboot(splitMessage []string) {
-	log.Println("Restarting:", splitMessage[1])
+func sendClientCommand(clientName string, command shared.ClientCommand) {
+	if clientName == "" {
+		log.Println("restart data empty")
+		return
+	}
+
+	log.Println("Restarting:", clientName)
 
 	statusLock.Lock()
-	client, ok := status[splitMessage[1]]
+	client, ok := status[clientName]
 	statusLock.Unlock()
 	if ok {
 		if client.Online {
 			socketsLock.Lock()
-			if conn, ok := clientSockets[splitMessage[1]]; ok {
-				err := conn.WriteMessage(websocket.TextMessage, []byte("reboot"))
+			if conn, ok := clientSockets[clientName]; ok {
+				err := conn.WriteMessage(websocket.TextMessage, []byte(command))
 				if err != nil {
-					log.Println("Error sending restart command to:", splitMessage[1])
+					log.Println("Error sending restart command to:", clientName)
 				}
 			}
 			socketsLock.Unlock()
 		}
+	} else {
+		log.Println("Error finding client.")
 	}
 }
 
-func handleAdd(splitMessage []string) {
+func handleAdd(data string) {
+	if data == "" {
+		log.Println("restart data empty")
+		return
+	}
+
 	statusLock.Lock()
-	client, ok := status[splitMessage[1]]
+	client, ok := status[data]
 	statusLock.Unlock()
 	if ok {
 		contains := false
@@ -198,10 +238,15 @@ func handleAdd(splitMessage []string) {
 	}
 }
 
-func handleRemove(splitMessage []string) {
+func handleRemove(data string) {
+	if data == "" {
+		log.Println("restart data empty")
+		return
+	}
+	
 	if viper.IsSet("clients") {
 		for i, c := range viper.GetStringSlice("clients") {
-			if c == splitMessage[1] {
+			if c == data {
 				viper.Set("clients", remove(viper.GetStringSlice("clients"), i))
 				err := viper.WriteConfig()
 				if err != nil {
